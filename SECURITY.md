@@ -90,12 +90,44 @@
 
 ---
 
+---
+
+## Wake Static Analysis Findings
+
+Detected with `wake detect all --min-impact medium` on `src/QuantDEX.sol`:
+
+| Severity | Detector | Finding | Status |
+|---|---|---|---|
+| HIGH (impact) / MEDIUM (confidence) | `reentrancy` | `swap()` — two external token calls before state update is complete | **Mitigated** by `nonReentrant` guard + CEI pattern |
+| HIGH (impact) / LOW (confidence) | `reentrancy` | `addLiquidity()`, `removeLiquidity()` — token transfers before/after state writes | **Mitigated** by `nonReentrant` guard |
+| HIGH (impact) / MEDIUM (confidence) | `unchecked-return-value` | Raw `IERC20.transferFrom()` / `transfer()` calls ignore bool return | **Known limitation** — non-compliant tokens silently fail |
+| MEDIUM (impact) / HIGH (confidence) | `unsafe-erc20-call` | Direct ERC-20 calls without SafeERC20 wrapper | **Known limitation** — production should use OZ SafeERC20 |
+
+### Explanation of findings
+
+**Reentrancy (mitigated):** Wake's detector flags the token transfer sites because they technically appear before/after state writes in the control flow. However, these are protected by `ReentrancyGuard.nonReentrant` which reverts any recursive call. The CEI pattern is also followed in `swap()` and `removeLiquidity()` — state is updated before interactions.
+
+**Unchecked return values / unsafe ERC-20 (known, educational):** The IERC20 interface calls do not check the bool return value from `transfer()` / `transferFrom()`. Non-standard tokens (e.g., USDT, BNB) do not return a bool — these calls will silently succeed even if the transfer fails. Production code should use OpenZeppelin's `SafeERC20.safeTransfer()` which adds a return-value check and compatibility shim.
+
+```solidity
+// Current (educational):
+IERC20(token).transferFrom(caller, address(this), amount);
+
+// Production fix:
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+using SafeERC20 for IERC20;
+IERC20(token).safeTransferFrom(caller, address(this), amount);
+```
+
+---
+
 ## Test Coverage
 
 ```
-forge test -vv              # all unit tests
+forge test -vv                                              # all unit + attack tests
 forge test --match-contract InvariantTest --fuzz-runs 1000  # property tests
-forge test --match-contract AttacksTest   # attack simulations
+wake test tests/test_amm_wake.py -v                         # Wake Python fuzz tests
+wake detect all --min-impact medium                         # Static analysis
 ```
 
 ## Resources
