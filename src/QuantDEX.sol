@@ -45,7 +45,9 @@ contract QuantDEX is ReentrancyGuard {
 
     /// @dev LP share balance per pool per provider.
     ///      Shares represent a pro-rata claim on both reserves.
-    ///      Attack: share inflation on first deposit — mitigated by geometric-mean bootstrap.
+    ///      Attack: first-deposit share inflation. Closed here by INTERNAL reserve
+    ///      accounting (reserves are state, not balanceOf), so a donation can't move
+    ///      share price. The sqrt bootstrap is for ratio-independence, not this — see addLiquidity.
     ///      See: https://github.com/Uniswap/v2-core/issues/148
     mapping(bytes32 => mapping(address => uint256)) public shares;
 
@@ -107,13 +109,17 @@ contract QuantDEX is ReentrancyGuard {
     /// @notice Deposit tokenA and tokenB to mint LP shares.
     ///
     /// @dev ATTACK SURFACE — Share inflation (first deposit):
-    ///      Without the geometric-mean bootstrap, an attacker could:
-    ///        1. Be the first depositor with 1 wei of each token
-    ///        2. Donate large amounts directly to the contract
-    ///        3. Inflate share value so subsequent depositors get 0 shares
-    ///      MITIGATION: sharesMinted = sqrt(amountA * amountB) for the bootstrap.
-    ///      This ties share value to actual deposit size, making 1-wei seeding expensive.
-    ///      See: Uniswap v2 whitepaper §3.4 | SWC-101 (Integer Overflow — N/A, handled by 0.8.x)
+    ///      The classic vector: be the first depositor with 1 wei of each token, donate a
+    ///      large amount directly to the contract, and inflate share value so the next
+    ///      depositor's mint rounds to 0 shares. That attack REQUIRES the pool to read its
+    ///      token balance as the reserve. This contract does not — reserves are internal
+    ///      accounting (pool.reserveA/reserveB), updated only inside addLiquidity/swap, so a
+    ///      raw transfer is invisible to the share math and the vector is structurally closed.
+    ///      NOTE: the sqrt(amountA * amountB) bootstrap below is NOT the inflation defense. It
+    ///      sets initial share value independent of the deposit RATIO (Uniswap v2 §3.4). The
+    ///      canonical defense for balanceOf-based pools is burning dead shares (UniV2
+    ///      MINIMUM_LIQUIDITY) or virtual shares (ERC-4626) — a linear cost, not quadratic.
+    ///      See: Uniswap v2 whitepaper §3.4 | https://docs.openzeppelin.com/contracts/5.x/erc4626
     ///
     /// @dev PATTERN — CEI (Checks-Effects-Interactions):
     ///      transferFrom calls appear before state writes in source, but they only
@@ -148,10 +154,12 @@ contract QuantDEX is ReentrancyGuard {
         uint256 actual1 = amt1;
 
         if (pool.totalShares == 0) {
-            // BOOTSTRAP: geometric mean of initial deposit.
-            // @security Ties initial share value to sqrt(A*B) rather than a fixed 1:1
-            //           ratio. An attacker cannot bootstrap with dust and then inflate
-            //           by donation because the geometric mean scales with deposit size.
+            // BOOTSTRAP: initial share supply = geometric mean of the deposit.
+            // @security This sets initial share value independent of the deposit RATIO
+            //           (Uniswap v2 §3.4); it is NOT the first-deposit inflation defense.
+            //           The donation-inflation attack is closed structurally instead:
+            //           reserves are internal accounting (pool.reserveA/B), so a direct
+            //           token donation never enters the share math and can't move price.
             //           Auditors: verify sqrt precision here — rounding down is safe
             //           because it slightly undervalues the first depositor's shares,
             //           never overvaluing. Residual dust stays in the pool forever.

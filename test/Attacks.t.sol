@@ -176,16 +176,19 @@ contract AttacksTest is Test {
     // Attack 2: Donation / Share Inflation
     // -------------------------------------------------------------------------
 
-    /// @notice Demonstrates the share inflation attack and how geometric-mean bootstrap mitigates it.
+    /// @notice Demonstrates the first-deposit donation/inflation attack — and why this
+    ///         contract is immune to it: internal reserve accounting.
     ///
-    /// Classic attack on AMMs with linear (not sqrt) share bootstrapping:
+    /// Classic attack on AMMs that read their token BALANCE as the reserve:
     ///   1. Attacker is the first depositor — deposits 1 wei each token → gets 1 share
     ///   2. Attacker "donates" a large amount directly to the contract (bypassing addLiquidity)
-    ///   3. 1 share now represents enormous value: next depositor gets 0 shares and loses funds
+    ///   3. If reserves == balanceOf, 1 share now represents enormous value: the next
+    ///      depositor's mint rounds to 0 shares and they lose funds
     ///
-    /// MITIGATION HERE: geometric-mean bootstrap means 1 share ≈ sqrt(amountA * amountB).
-    /// Donating to inflate 1 share to N value costs the attacker ~N^2 tokens, making it
-    /// economically infeasible for large N.
+    /// WHY IT FAILS HERE: reserves are internal accounting (pool.reserveA/reserveB), updated
+    /// only inside addLiquidity/swap. A raw transfer never enters the share math, so the
+    /// donation is simply ignored and the second depositor mints against the real reserves.
+    /// (The sqrt bootstrap is for ratio-independence — Uniswap v2 §3.4 — not this defense.)
     function testDonationAttack() public {
         address firstDepositor = address(0x4444);
         address secondDepositor = address(0x5555);
@@ -223,11 +226,10 @@ contract AttacksTest is Test {
         tB.transfer(address(freshDex), DONATION);
         vm.stopPrank();
 
-        // Step 3: Second depositor adds liquidity
-        // With geometric mean bootstrap, second depositor's shares are calculated
-        // against the actual pool reserves (including donated amounts).
-        // They get fewer shares per token, but NOT zero — the sqrt bootstrap
-        // makes the inflation cost quadratic.
+        // Step 3: Second depositor adds liquidity.
+        // Because reserves are internal accounting, the donation above never entered
+        // pool.reserveA/reserveB — the second depositor's shares are computed against the
+        // REAL reserves (the dust), so they mint normally. The donated tokens are dead weight.
         vm.startPrank(secondDepositor);
         tA.approve(address(freshDex), type(uint256).max);
         tB.approve(address(freshDex), type(uint256).max);
@@ -237,12 +239,11 @@ contract AttacksTest is Test {
         emit log_named_uint("Second depositor shares received", sharesReceived);
         emit log_named_uint("First depositor total donated (tokens)", (DONATION * 2) / 1e18);
 
-        // Key assertion: second depositor still gets nonzero shares
-        // The attack is not fully neutralized — they do get fewer shares per token —
-        // but the attacker's donation cost is enormous relative to the gain.
+        // Key assertion: second depositor still gets nonzero shares — in fact full shares,
+        // because the donation was invisible to the reserve accounting (no dilution at all).
         assertGt(sharesReceived, 0, "Second depositor should always receive shares > 0");
-        emit log_string("Donation inflated share value but did NOT cause zero-share mint.");
-        emit log_string("Attack cost: 2000 tokens donated. Attack gain: minimal dilution of 2nd depositor.");
+        emit log_string("Donation never entered internal reserves, so share value was unaffected.");
+        emit log_string("The attack is closed by accounting, not by the sqrt bootstrap.");
     }
 
     // -------------------------------------------------------------------------
