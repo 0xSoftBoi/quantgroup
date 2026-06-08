@@ -1,0 +1,319 @@
+# Instincts generated from https://github.com/0xSoftBoi/quantgroup
+# Generated: 2026-06-08T05:54:58.246Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: quantgroup-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/0xSoftBoi/quantgroup
+---
+
+# Quantgroup Commit Length
+
+## Action
+
+Write moderate-length commit messages (~62 characters)
+
+## Evidence
+
+- Average commit message length: 62 chars
+- Based on 1 commits
+
+---
+id: quantgroup-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/0xSoftBoi/quantgroup
+---
+
+# Quantgroup Naming Files
+
+## Action
+
+Use PascalCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: PascalCase
+
+---
+id: quantgroup-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/0xSoftBoi/quantgroup
+---
+
+# Quantgroup Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: quantgroup-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/0xSoftBoi/quantgroup
+---
+
+# Quantgroup Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: quantgroup-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/0xSoftBoi/quantgroup
+---
+
+# Quantgroup Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: quantgroup-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/0xSoftBoi/quantgroup
+---
+
+# Quantgroup Test Naming
+
+## Action
+
+Name test files using the pattern: *.test.ts
+
+## Evidence
+
+- File pattern: *.test.ts
+- Consistent across test files
+
+---
+id: quantgroup-instinct-file-naming
+trigger: "When creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct File Naming
+
+## Action
+
+Name the file using PascalCase
+
+## Evidence
+
+- Pattern in namingConventions.files
+
+---
+id: quantgroup-instinct-function-naming
+trigger: "When defining a function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct Function Naming
+
+## Action
+
+Name the function using camelCase
+
+## Evidence
+
+- Pattern in namingConventions.functions
+
+---
+id: quantgroup-instinct-class-naming
+trigger: "When creating a class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct Class Naming
+
+## Action
+
+Name the class using PascalCase
+
+## Evidence
+
+- Pattern in namingConventions.classes
+
+---
+id: quantgroup-instinct-constant-naming
+trigger: "When declaring a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct Constant Naming
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE
+
+## Evidence
+
+- Pattern in namingConventions.constants
+
+---
+id: quantgroup-instinct-import-style
+trigger: "When importing modules"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct Import Style
+
+## Action
+
+Use relative import paths
+
+## Evidence
+
+- Pattern in importStyle
+
+---
+id: quantgroup-instinct-export-style
+trigger: "When exporting modules or functions"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in exportStyle
+
+---
+id: quantgroup-instinct-test-file-naming
+trigger: "When creating a test file"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct Test File Naming
+
+## Action
+
+Name the file with the pattern *.test.ts
+
+## Evidence
+
+- Pattern in testing.filePattern
+
+---
+id: quantgroup-instinct-test-type
+trigger: "When writing tests"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct Test Type
+
+## Action
+
+Focus on unit tests
+
+## Evidence
+
+- Pattern in testing.testTypes
+
+---
+id: quantgroup-instinct-test-location
+trigger: "When adding or organizing test files"
+confidence: 0.8
+domain: architecture
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct Test Location
+
+## Action
+
+Place test files in the separate 'test' folder
+
+## Evidence
+
+- Pattern in architecture.folderStructure.commonFolders
+- Pattern in architecture.folderStructure.testLocation
+
+---
+id: quantgroup-instinct-commit-format
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: 0xSoftBoi/quantgroup
+---
+
+# Quantgroup Instinct Commit Format
+
+## Action
+
+Use a freeform message without a specific prefix; keep messages concise (around 62 characters on average)
+
+## Evidence
+
+- Pattern in commits.type
+- Pattern in commits.averageLength
+- Example: 'Harden transfers (SafeERC20) + safe polish; sync docs to match'
+
