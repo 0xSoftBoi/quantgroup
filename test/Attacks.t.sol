@@ -12,7 +12,7 @@ import "../src/QuantDEX.sol";
 /// @dev These tests are EDUCATIONAL. Some "attacks" succeed — the point is to
 ///      document the behavior, not claim the contract is broken.
 ///      Read the comments in each test carefully.
-contract MockERC20 is IERC20 {
+contract MockERC20 {
     string public name;
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;

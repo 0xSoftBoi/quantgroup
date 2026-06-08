@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "../src/QuantDEX.sol";
 
 /// @dev Minimal mintable ERC20 for handler use
-contract InvariantToken is IERC20 {
+contract InvariantToken {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
