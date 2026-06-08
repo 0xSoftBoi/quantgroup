@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./interfaces/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title QuantDEX — Constant-Product AMM (Security Reference Implementation)
@@ -19,11 +20,16 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @custom:cwe-reference https://cwe.mitre.org
 ///
 /// Known limitations (documented, not bugs):
-/// - No TWAP oracle → reserves are manipulable within a single block (SWC-120 adjacent)
+/// - No TWAP oracle → spot reserves are manipulable within a single transaction. No SWC
+///   entry covers this; see samczsun, "So you want to use a price oracle."
+/// - Standard ERC20s only → reserves are credited by the requested amount, so
+///   fee-on-transfer / rebasing tokens would over-credit and break solvency.
 /// - No flash loan → reduces manipulation surface vs Uniswap v2
 /// - No factory → single deployer, not trustless
 /// - Integer math rounds down → tiny rounding losses accrue to the pool (safe, but audit note)
 contract QuantDEX is ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     // -------------------------------------------------------------------------
     // Types
     // -------------------------------------------------------------------------
@@ -122,10 +128,9 @@ contract QuantDEX is ReentrancyGuard {
     ///      See: Uniswap v2 whitepaper §3.4 | https://docs.openzeppelin.com/contracts/5.x/erc4626
     ///
     /// @dev PATTERN — CEI (Checks-Effects-Interactions):
-    ///      transferFrom calls appear before state writes in source, but they only
-    ///      PULL funds in — the contract never holds a "mid-state" where it has
-    ///      debited state without receiving tokens. nonReentrant is the backstop.
-    ///      See: SWC-107 (Reentrancy)
+    ///      State is credited (reserves, shares) BEFORE tokens are pulled. A failed pull
+    ///      reverts the whole transaction, so there is never a debited mid-state; and
+    ///      nonReentrant is the backstop. See: SWC-107 (Reentrancy)
     ///
     /// @param tokenA One token in the pair. Can be passed in either order.
     /// @param tokenB The other token.
@@ -147,7 +152,7 @@ contract QuantDEX is ReentrancyGuard {
             ? (amountA, amountB)
             : (amountB, amountA);
 
-        bytes32 key = keccak256(abi.encodePacked(t0, t1));
+        bytes32 key = _poolKey(tokenA, tokenB);
         Pool storage pool = pools[key];
 
         uint256 actual0 = amt0;
@@ -190,19 +195,21 @@ contract QuantDEX is ReentrancyGuard {
 
         require(sharesMinted > 0, "ZERO_SHARES");
 
-        // INTERACTIONS: pull tokens from caller.
-        // @security nonReentrant guards against re-entry here. If a token's
-        //           transferFrom re-enters addLiquidity, the reentrancy guard reverts.
-        //           SWC-107: reentrancy — mitigated by ReentrancyGuard.
         address caller = msg.sender;
-        IERC20(t0).transferFrom(caller, address(this), actual0);
-        IERC20(t1).transferFrom(caller, address(this), actual1);
 
-        // EFFECTS: update pool state after external calls.
+        // EFFECTS first (CEI): credit reserves and shares before pulling tokens.
+        // @security A failed pull reverts the whole tx, so crediting first is safe;
+        //           nonReentrant is defense-in-depth. SWC-107.
         pool.reserveA += actual0;
         pool.reserveB += actual1;
         pool.totalShares += sharesMinted;
         shares[key][caller] += sharesMinted;
+
+        // INTERACTIONS last: pull tokens from caller. safeTransferFrom reverts on a
+        // token that returns false or no value (SWC-104). Reserves are credited by the
+        // requested amount — fee-on-transfer tokens are unsupported (see contract notes).
+        IERC20(t0).safeTransferFrom(caller, address(this), actual0);
+        IERC20(t1).safeTransferFrom(caller, address(this), actual1);
 
         emit LiquidityAdded(caller, t0, t1, actual0, actual1, sharesMinted);
     }
@@ -229,7 +236,7 @@ contract QuantDEX is ReentrancyGuard {
         require(sharesToBurn > 0, "ZERO_SHARES");
 
         (address t0, address t1) = _sortTokens(tokenA, tokenB);
-        bytes32 key = keccak256(abi.encodePacked(t0, t1));
+        bytes32 key = _poolKey(tokenA, tokenB);
         Pool storage pool = pools[key];
 
         require(shares[key][msg.sender] >= sharesToBurn, "INSUFFICIENT_SHARES");
@@ -250,9 +257,9 @@ contract QuantDEX is ReentrancyGuard {
         pool.reserveA -= out0;
         pool.reserveB -= out1;
 
-        // INTERACTIONS last.
-        IERC20(t0).transfer(msg.sender, out0);
-        IERC20(t1).transfer(msg.sender, out1);
+        // INTERACTIONS last. safeTransfer reverts on a non-compliant token (SWC-104).
+        IERC20(t0).safeTransfer(msg.sender, out0);
+        IERC20(t1).safeTransfer(msg.sender, out1);
 
         (amountA, amountB) = tokenA == t0 ? (out0, out1) : (out1, out0);
 
@@ -345,9 +352,10 @@ contract QuantDEX is ReentrancyGuard {
             pool.reserveA -= amountOut;
         }
 
-        // INTERACTIONS: pull tokenIn, push tokenOut.
-        IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
-        IERC20(tokenOut).transfer(msg.sender, amountOut);
+        // INTERACTIONS: pull tokenIn, push tokenOut. safeTransfer* revert on a token
+        // that returns false or no value (SWC-104).
+        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+        IERC20(tokenOut).safeTransfer(msg.sender, amountOut);
 
         emit Swap(msg.sender, tokenIn, tokenOut, amountIn, amountOut);
     }
@@ -356,11 +364,12 @@ contract QuantDEX is ReentrancyGuard {
     // Internal math
     // -------------------------------------------------------------------------
 
-    /// @dev Babylonian square root. Used only for LP share bootstrap.
-    ///      NOTE: Rounds DOWN — this means the first depositor receives
-    ///      slightly fewer shares than the geometric mean. The rounding error
-    ///      (at most 1 wei of shares) stays in the pool permanently as a dust reserve.
-    ///      This is intentional and safe — it prevents a class of "1 share" attacks.
+    /// @dev Babylonian square root. Used only for the LP share bootstrap.
+    ///      NOTE: Rounds DOWN — the first depositor receives slightly fewer shares than
+    ///      the exact geometric mean. The error (at most 1 wei of shares) stays in the
+    ///      pool as harmless dust that accrues to remaining LPs. This rounding is NOT a
+    ///      security mechanism: the first-deposit inflation attack is closed by internal
+    ///      reserve accounting (see addLiquidity), not by the sqrt bootstrap.
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
         if (y > 3) {
             z = y;

@@ -28,6 +28,14 @@ amountOut = (amountIn * 997 * reserveOut) / (reserveIn * 1000 + amountIn * 997)
 
 The 0.3% fee stays in the pool, accruing to LPs. The `minAmountOut` parameter acts as a slippage guard — the call reverts if the output falls below it.
 
+### Security notes
+
+- **Reserves are internal accounting** (`pool.reserveA`/`pool.reserveB`), never `balanceOf`. This structurally closes the first-depositor donation/inflation attack: a raw transfer to the contract isn't counted, so it can't move share price. (The `sqrt` bootstrap is only for ratio-independence — Uniswap v2 §3.4 — not the inflation defense.)
+- **Transfers use OpenZeppelin `SafeERC20`**, so tokens that return `false` or no value (e.g. USDT) revert rather than silently failing.
+- **Standard ERC20s only.** Reserves are credited by the requested amount, so fee-on-transfer / rebasing tokens are unsupported.
+
+Full attack-surface analysis: [`SECURITY.md`](./SECURITY.md). Status: unaudited, educational.
+
 ## Stack
 
 - Solidity `^0.8.20`

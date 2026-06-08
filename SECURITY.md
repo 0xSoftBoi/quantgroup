@@ -8,12 +8,13 @@
 | Attack Vector | SWC ID | CWE | Affected Function | Mitigation | Test |
 |---|---|---|---|---|---|
 | Reentrancy | SWC-107 | CWE-841 | `swap`, `removeLiquidity`, `addLiquidity` | `ReentrancyGuard` + CEI pattern | `QuantDEX.t.sol::testReentrancyProtection` |
-| Share inflation (1st deposit) | — | CWE-682 | `addLiquidity` | Geometric-mean bootstrap `sqrt(A*B)` | `Attacks.t.sol::testDonationAttack` |
+| Share inflation (1st deposit) | — | CWE-682 | `addLiquidity` | Internal reserve accounting (reserves are state, not `balanceOf`) | `Attacks.t.sol::testDonationAttack` |
 | Sandwich / front-running | SWC-114 | CWE-362 | `swap` | `amountOutMin` slippage guard | `Attacks.t.sol::testSandwichAttackSetup` |
-| Price oracle manipulation | SWC-120 | CWE-330 | N/A (no oracle) | No oracle exposed; document limitation | `Attacks.t.sol::testPriceManipulation` |
+| Price oracle manipulation | — | — | N/A (no oracle) | No oracle exposed; no SWC entry — see samczsun, "So you want to use a price oracle" | `Attacks.t.sol::testPriceManipulation` |
+| Unchecked ERC20 return | SWC-104 | CWE-252 | all transfers | OpenZeppelin `SafeERC20` (`safeTransfer`/`safeTransferFrom`) | covered by standard-token tests |
 | Integer overflow/underflow | SWC-101 | CWE-190 | All math | Solidity 0.8.x checked arithmetic | N/A |
 | Token ordering / duplicate pool | — | CWE-706 | `_poolKey` | Canonical sort: always `token0 < token1` | `QuantDEX.t.sol::testPoolSymmetry` |
-| Donation attack (reserve donation) | — | CWE-682 | `addLiquidity` | Geometric-mean limits inflation cost | `Attacks.t.sol::testDonationAttack` |
+| Donation attack (reserve donation) | — | CWE-682 | `addLiquidity` | Internal reserve accounting (donations never enter share math) | `Attacks.t.sol::testDonationAttack` |
 | Dust / zero-share mint | — | CWE-682 | `addLiquidity` | `require(sharesMinted > 0)` | `QuantDEX.t.sol::testAddLiquidity` |
 
 ---
@@ -32,17 +33,19 @@
 ---
 
 ### 2. Share Inflation (First Deposit)
-**What it is:** Without a geometric-mean bootstrap, a first depositor can:
+**What it is:** the classic first-depositor attack:
 1. Deposit 1 wei of each token → receive 1 share
 2. Donate a large amount directly to the contract
 3. Force the pool's "price per share" to enormous value
 4. Next depositor's `shares = deposit / inflated_value` rounds to 0 → they lose all tokens
 
-**Mitigation:** `sharesMinted = sqrt(amountA * amountB)` for the first deposit. The attacker must donate O(N²) tokens to inflate 1 share to value N — quadratic cost makes large-scale inflation infeasible.
+**Why this contract is immune:** step 3 only works if the pool reads its token *balance* as the reserve. QuantDEX does not — reserves are internal accounting (`pool.reserveA`/`pool.reserveB`), updated only inside `addLiquidity`/`swap`. A direct donation never enters the share math, so it can't move the price. The vector is closed structurally (see §5, the same defense).
 
-**In code:** `QuantDEX.sol` L99 — bootstrap via `_sqrt`.
+**Note on the `sqrt` bootstrap:** `sharesMinted = sqrt(amountA * amountB)` is *not* the inflation defense — that's a common misconception. Its job is to set initial share value independent of the deposit *ratio* (Uniswap v2 §3.4). There is no `O(N²)` cost barrier; the canonical defenses for balance-based pools (Uniswap v2's `MINIMUM_LIQUIDITY` dead-share burn, ERC-4626 virtual shares) cost *linearly*.
 
-**Residual risk:** A careful attacker can still cause the second depositor to receive slightly fewer shares. The geometric-mean does NOT fully eliminate dilution — it makes it expensive. Production AMMs (Uniswap v2) burn `MINIMUM_LIQUIDITY` (1000 shares) to lock them permanently, further hardening this. This contract does not burn minimum liquidity — a known simplification.
+**In code:** `src/QuantDEX.sol` — `addLiquidity` (reserve accounting) and `_sqrt` (the bootstrap).
+
+**Residual / defense-in-depth:** this contract does not burn `MINIMUM_LIQUIDITY` dead shares. That's a deliberate simplification, not a gap — internal accounting already closes donation inflation; dead shares would only add belt-and-suspenders hardening.
 
 ---
 
@@ -62,7 +65,7 @@
 ### 4. Price Oracle Manipulation
 **What it is:** This contract intentionally has NO price oracle. If another contract reads `pool.reserveA` / `pool.reserveB` as a spot price, an attacker can manipulate it in a single transaction.
 
-**Mitigation:** Do not use this contract's reserves as a price oracle. For production use, implement a TWAP oracle (Uniswap v2's cumulative price mechanism) or integrate Chainlink.
+**Mitigation:** Do not use this contract's reserves as a price oracle. For production use, implement a TWAP oracle (Uniswap v2's cumulative price mechanism) or integrate Chainlink. There is no SWC entry for this class; the canonical reference is samczsun, ["So you want to use a price oracle"](https://samczsun.com/so-you-want-to-use-a-price-oracle/).
 
 **In code:** No oracle functions exposed — by design.
 
@@ -82,7 +85,8 @@
 | Limitation | Impact | Production Fix |
 |---|---|---|
 | No TWAP oracle | Spot price is manipulable | Cumulative price tracking (Uniswap v2 style) |
-| No MINIMUM_LIQUIDITY burn | First-deposit share inflation slightly easier | Burn 1000 shares to zero address at bootstrap |
+| No MINIMUM_LIQUIDITY burn | None for inflation (internal accounting already closes it); defense-in-depth only | Burn 1000 shares to zero address at bootstrap |
+| Fee-on-transfer / rebasing tokens unsupported | Reserves credited by requested amount → would over-credit and break solvency | Measure `balanceOf` delta on receipt |
 | No factory / CREATE2 | No trustless pair discovery | Factory contract with deterministic addresses |
 | No flash loans | Limits composability | Add `flash()` callback (but adds attack surface) |
 | No multi-hop routing | No indirect swaps | Router contract computing optimal paths |
@@ -100,24 +104,22 @@ Detected with `wake detect all --min-impact medium` on `src/QuantDEX.sol`:
 |---|---|---|---|
 | HIGH (impact) / MEDIUM (confidence) | `reentrancy` | `swap()` — two external token calls before state update is complete | **Mitigated** by `nonReentrant` guard + CEI pattern |
 | HIGH (impact) / LOW (confidence) | `reentrancy` | `addLiquidity()`, `removeLiquidity()` — token transfers before/after state writes | **Mitigated** by `nonReentrant` guard |
-| HIGH (impact) / MEDIUM (confidence) | `unchecked-return-value` | Raw `IERC20.transferFrom()` / `transfer()` calls ignore bool return | **Known limitation** — non-compliant tokens silently fail |
-| MEDIUM (impact) / HIGH (confidence) | `unsafe-erc20-call` | Direct ERC-20 calls without SafeERC20 wrapper | **Known limitation** — production should use OZ SafeERC20 |
+| HIGH (impact) / MEDIUM (confidence) | `unchecked-return-value` | Raw `IERC20.transferFrom()` / `transfer()` calls ignore bool return | **Fixed** — all transfers use `SafeERC20` |
+| MEDIUM (impact) / HIGH (confidence) | `unsafe-erc20-call` | Direct ERC-20 calls without SafeERC20 wrapper | **Fixed** — `using SafeERC20 for IERC20` |
 
 ### Explanation of findings
 
-**Reentrancy (mitigated):** Wake's detector flags the token transfer sites because they technically appear before/after state writes in the control flow. However, these are protected by `ReentrancyGuard.nonReentrant` which reverts any recursive call. The CEI pattern is also followed in `swap()` and `removeLiquidity()` — state is updated before interactions.
+**Reentrancy (mitigated):** Wake's detector flags the token transfer sites because they technically appear before/after state writes in the control flow. However, these are protected by `ReentrancyGuard.nonReentrant` which reverts any recursive call. All three functions now also follow CEI strictly — state is updated before the external transfers.
 
-**Unchecked return values / unsafe ERC-20 (known, educational):** The IERC20 interface calls do not check the bool return value from `transfer()` / `transferFrom()`. Non-standard tokens (e.g., USDT, BNB) do not return a bool — these calls will silently succeed even if the transfer fails. Production code should use OpenZeppelin's `SafeERC20.safeTransfer()` which adds a return-value check and compatibility shim.
+**Unchecked return values / unsafe ERC-20 (FIXED):** the contract now routes every transfer through OpenZeppelin's `SafeERC20` (`using SafeERC20 for IERC20`). `safeTransfer`/`safeTransferFrom` revert when a token returns `false`, and include the compatibility shim for non-standard tokens (USDT, BNB) that return no bool at all — closing SWC-104.
 
 ```solidity
-// Current (educational):
-IERC20(token).transferFrom(caller, address(this), amount);
-
-// Production fix:
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 using SafeERC20 for IERC20;
 IERC20(token).safeTransferFrom(caller, address(this), amount);
 ```
+
+One residual assumption remains, documented above: reserves are credited by the *requested* amount, so fee-on-transfer / rebasing tokens are unsupported.
 
 ---
 
